@@ -190,19 +190,19 @@ func (s *store) statsTopics(limit int) ([]topicRow, error) {
 // ---------- memories browse/search ----------
 
 type memory struct {
-	ID         int64   `json:"id"`
-	Type       string  `json:"type"`
-	Title      string  `json:"title"`
-	Content    string  `json:"content,omitempty"`
-	Project    string  `json:"project"`
-	Scope      string  `json:"scope"`
-	TopicKey   string  `json:"topic_key"`
-	SessionID  string  `json:"session_id"`
-	Revisions  int     `json:"revisions"`
-	Duplicates int     `json:"duplicates"`
-	Pinned     bool    `json:"pinned"`
-	CreatedAt  string  `json:"created_at"`
-	UpdatedAt  string  `json:"updated_at"`
+	ID         int64  `json:"id"`
+	Type       string `json:"type"`
+	Title      string `json:"title"`
+	Content    string `json:"content,omitempty"`
+	Project    string `json:"project"`
+	Scope      string `json:"scope"`
+	TopicKey   string `json:"topic_key"`
+	SessionID  string `json:"session_id"`
+	Revisions  int    `json:"revisions"`
+	Duplicates int    `json:"duplicates"`
+	Pinned     bool   `json:"pinned"`
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
 }
 
 const memCols = `o.id, COALESCE(o.type,''), COALESCE(o.title,''), COALESCE(o.project,''),

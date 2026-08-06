@@ -21,7 +21,7 @@
 | Piece | What it does |
 |---|---|
 | **`patches/engram-lan-mcp-v2.patch`** | Adds `--http <addr>` to `engram mcp` (streamable HTTP transport from mcp-go, same `MCPServer` object — tools untouched) plus bearer-token auth backed by a **multi-account token list file** with hot reload. ~230-line diff, one file: `cmd/engram/main.go`. Without `--http`, behavior is 100% upstream. |
-| **`admin/`** | A zero-dependency Go binary serving a web panel on your LAN: per-person token issue/revoke (no service restart), read-only memory browser with full-text search, and global statistics dashboards. |
+| **`admin/`** | A zero-dependency Go binary serving a web panel on your LAN: user accounts with roles (admin + self-service members), per-person token issue/revoke (no service restart), read-only memory browser with full-text search, and global statistics dashboards. |
 
 One server process owns the SQLite file; every agent on the LAN talks to the same memory base over HTTP.
 
@@ -38,6 +38,19 @@ Upstream's `engram cloud serve` is a **sync backend** (Postgres + JWT): every cl
 | Memory detail | Statistics |
 |---|---|
 | ![detail](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@54b9568049013b697d833753eaf955d81032ad99/docs/assets/detail.png) | ![stats](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@54b9568049013b697d833753eaf955d81032ad99/docs/assets/stats.png) |
+
+| My Key (member self-service) | User management (admin) |
+|---|---|
+| ![me](docs/assets/me.png) | ![users](docs/assets/users.png) |
+
+### User accounts & self-service keys
+
+The panel has a real account system with two roles:
+
+- **Admin** (seeded from `ENGRAM_ADMIN_PASS_BCRYPT` on first run): everything a member can do, plus **User management** (create/disable/reset-password/delete accounts) and the legacy **Token 管理** page. Deleting a user also deletes their agent token.
+- **Member**: logs in with username + password, lands on **我的 Key / My Key** — one click to mint or regenerate their personal agent token (old one dies instantly, hot-reloaded by the server), plus a copy-ready `claude mcp add` command with the token already filled in. Members can also change their own password and browse the read-only memory/stats pages.
+
+Sessions carry roles; every admin-only API is enforced server-side (`403` for members), not just hidden in the nav.
 
 ### In action
 
@@ -114,7 +127,7 @@ open http://<server>:7441
 | Layer | Mechanism |
 |---|---|
 | Network auth | Per-person bearer tokens in a JSON list; constant-time comparison; revoked/missing/corrupt → 401 (fail-closed); 401s logged with source IP |
-| Panel auth | Single admin, bcrypt password, in-memory sessions (HttpOnly + SameSite=Strict cookies), login rate limit 5/5min/IP |
+| Panel auth | Account system in panel-owned SQLite (`ENGRAM_ADMIN_DB`): bcrypt passwords, roles (admin/member), in-memory sessions (HttpOnly + SameSite=Strict cookies), login rate limit 5/5min/IP; admin-only APIs enforced server-side |
 | DB integrity | Panel is physically read-only (fs perms + `mode=ro`); server is the only writer |
 | Same-host users | DB dir `750`, files `640`, group = `engram`; only the panel user is in that group — other shell users cannot read the file at all |
 | Token storage | List file `0660 panel:engram`; server reads via group, panel writes atomically (tmp+rename) |
@@ -140,7 +153,7 @@ No TLS — it is plain HTTP inside your LAN. Do not expose either port outside i
 | 组件 | 作用 |
 |---|---|
 | **`patches/engram-lan-mcp-v2.patch`** | 给 `engram mcp` 加 `--http <addr>`（复用 mcp-go 自带的 streamable HTTP 传输，同一个 `MCPServer` 对象，18 个工具一行没改）+ 基于**多账号 token 名单文件**的鉴权，热重载。约 230 行 diff，只碰 `cmd/engram/main.go`。不带 `--http` 时行为与上游完全一致。 |
-| **`admin/`** | 零依赖 Go 单二进制，在局域网提供 Web 管理面板：按人签发/吊销 token（**不用重启服务**）、只读 memory 浏览（全文搜索）、全局统计大盘。 |
+| **`admin/`** | 零依赖 Go 单二进制，在局域网提供 Web 管理面板：账号体系（管理员 + 普通成员，成员自助取 key）、按人签发/吊销 token（**不用重启服务**）、只读 memory 浏览（全文搜索）、全局统计大盘。 |
 
 一个服务进程独占 SQLite 文件，网段内所有 agent 通过 HTTP 读写**同一个库**。
 
@@ -157,6 +170,19 @@ No TLS — it is plain HTTP inside your LAN. Do not expose either port outside i
 | 记忆详情 | 统计分析 |
 |---|---|
 | ![detail](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@54b9568049013b697d833753eaf955d81032ad99/docs/assets/detail.png) | ![stats](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@54b9568049013b697d833753eaf955d81032ad99/docs/assets/stats.png) |
+
+| 我的 Key（成员自助） | 用户管理（管理员） |
+|---|---|
+| ![me](docs/assets/me.png) | ![users](docs/assets/users.png) |
+
+### 账号体系与自助取 key
+
+面板是完整的账号系统，两种角色：
+
+- **管理员**（首次启动用 `ENGRAM_ADMIN_PASS_BCRYPT` 播种）：拥有成员全部能力，外加**用户管理**（开通/禁用/重置密码/删除，删除会连带吊销并删除该用户的 agent token）和 **Token 管理**页。
+- **普通成员**：用户名 + 密码登录，落地页就是**我的 Key**——一键生成/重新生成自己的 agent key（旧 key 立即失效，服务端热重载），页面直接给出已填好 token 的 `claude mcp add` 接入命令，复制即用。成员还可以自助改密码、浏览只读的 memory/统计页。
+
+会话带角色，所有管理员 API 在服务端强校验（成员访问返回 403），不只是藏导航。
 
 ### 动图演示
 
@@ -232,7 +258,7 @@ open http://<服务器>:7441
 | 层 | 机制 |
 |---|---|
 | 网络鉴权 | 按人 bearer token，名单文件热重载；constant-time 比对；吊销/文件损坏 → 401（fail-closed）；401 记来源 IP |
-| 面板登录 | 单管理员、bcrypt 密码、内存会话（HttpOnly + SameSite=Strict）、登录限流 5 次/5 分钟/IP |
+| 面板登录 | 面板自有 SQLite 账号库（`ENGRAM_ADMIN_DB`）：bcrypt 密码、角色（管理员/成员）、内存会话（HttpOnly + SameSite=Strict）、登录限流 5 次/5 分钟/IP；管理员 API 服务端强校验 |
 | 库完整性 | 面板物理只读（文件系统权限 + `mode=ro`）；服务端是唯一写入者 |
 | 同机用户隔离 | 库目录 `750`、文件 `640`、组 `engram`；只有面板用户在组里，其他 shell 用户读不到文件 |
 | token 存储 | 名单 `0660 面板用户:engram`；原子写（tmp+rename），服务端只读 |

@@ -13,7 +13,8 @@
   <div class="login-card">
     <h1>engram 管理面板</h1>
     <p class="muted" id="login-subtitle">LAN shared memory hub</p>
-    <input id="login-pass" type="password" placeholder="管理员密码" autocomplete="current-password">
+    <input id="login-user" type="text" placeholder="用户名" autocomplete="username">
+    <input id="login-pass" type="password" placeholder="密码" autocomplete="current-password">
     <button id="login-btn">登 录</button>
     <p id="login-err" class="err"></p>
   </div>
@@ -24,17 +25,55 @@
   <aside>
     <div class="brand">engram<span>admin</span></div>
     <nav>
+      <a href="#/me"      data-page="me">我的 Key</a>
       <a href="#/dash"    data-page="dash">总览</a>
       <a href="#/memory"  data-page="memory">Memory</a>
       <a href="#/stats"   data-page="stats">统计分析</a>
-      <a href="#/tokens"  data-page="tokens">Token 管理</a>
+      <a href="#/tokens"  data-page="tokens" data-admin="1">Token 管理</a>
+      <a href="#/users"   data-page="users" data-admin="1">用户管理</a>
     </nav>
     <button id="logout-btn" class="ghost">退出登录</button>
   </aside>
 
   <main>
+    <!-- 我的 Key（自助） -->
+    <section id="page-me" class="page hidden">
+      <h2>我的 Key</h2>
+      <div class="panel">
+        <h3>agent 接入 key</h3>
+        <div id="me-token-row" style="margin:12px 0">
+          <code id="me-token" class="token-mask">••••••••</code>
+          <button class="link" id="me-token-reveal">显示</button>
+          <button class="link" id="me-token-copy">复制</button>
+          <span id="me-token-state"></span>
+        </div>
+        <p class="muted small">这个 key 就是你的身份。agent 带上它读写共享记忆库。</p>
+        <div class="mem-content" id="me-join-cmd" style="margin-top:12px; font-family:ui-monospace,monospace; font-size:12.5px"></div>
+        <div style="margin-top:14px">
+          <button class="ghost" id="me-regen">重新生成 key</button>
+          <span class="muted small" style="margin-left:10px">旧 key 立即失效，agent 需换命令重配</span>
+        </div>
+        <div id="me-no-token" class="hidden" style="margin-top:14px">
+          <button id="me-mint">生成我的 key</button>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>修改密码</h3>
+        <div class="toolbar" style="margin-top:12px">
+          <input id="pw-old" type="password" placeholder="当前密码" autocomplete="current-password">
+          <input id="pw-new" type="password" placeholder="新密码（至少 8 位）" autocomplete="new-password">
+          <button id="pw-change">修改</button>
+        </div>
+        <p id="pw-msg" class="small"></p>
+      </div>
+      <div class="panel">
+        <h3>账号信息</h3>
+        <dl class="kv" id="me-info" style="margin-top:12px"></dl>
+      </div>
+    </section>
+
     <!-- 总览 -->
-    <section id="page-dash" class="page">
+    <section id="page-dash" class="page hidden">
       <h2>总览</h2>
       <div class="cards" id="dash-cards"></div>
       <div class="panel">
@@ -94,7 +133,26 @@
       </div>
     </section>
 
-    <!-- Token 管理 -->
+    <!-- 用户管理 (admin) -->
+    <section id="page-users" class="page hidden">
+      <h2>用户管理</h2>
+      <div class="toolbar">
+        <input id="u-name" type="text" placeholder="用户名，如 alice">
+        <input id="u-pass" type="text" placeholder="初始密码（至少 8 位）">
+        <button id="u-create">开通账号</button>
+      </div>
+      <div class="panel">
+        <table class="tbl" id="u-table">
+          <thead><tr><th>用户名</th><th>角色</th><th>状态</th><th>创建时间</th><th>最近登录</th><th>操作</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="muted small">
+        同事登录后在「我的 Key」页自助取 key 和接入命令。删除账号会同时吊销并删除他的 agent key。
+      </p>
+    </section>
+
+    <!-- Token 管理 (admin) -->
     <section id="page-tokens" class="page hidden">
       <h2>Token 管理</h2>
       <div class="toolbar">

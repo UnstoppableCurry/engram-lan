@@ -177,6 +177,44 @@ func (t *tokenStore) delete(name string) error {
 	return t.writeLocked()
 }
 
+// get returns one entry, full token included. Used for the self-service
+// "my key" page — callers must be the token owner or an admin.
+func (t *tokenStore) get(name string) (tokenEntry, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	e, ok := t.data[name]
+	if !ok {
+		return tokenEntry{}, fmt.Errorf("还没有 %q 的 token", name)
+	}
+	return e, nil
+}
+
+// regenerate issues a brand-new token for name (creating the entry if
+// needed). The old token dies the moment the file is reloaded.
+func (t *tokenStore) regenerate(name, note string) (string, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	raw := make([]byte, 24)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	full := "eng_" + base64.RawURLEncoding.EncodeToString(raw)
+	e, exists := t.data[name]
+	e.Token = full
+	e.Revoked = false
+	if !exists {
+		e.CreatedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	if note != "" && e.Note == "" {
+		e.Note = note
+	}
+	t.data[name] = e
+	if err := t.writeLocked(); err != nil {
+		return "", err
+	}
+	return full, nil
+}
+
 // ---------- HTTP handlers ----------
 
 func (s *server) handleTokenList(w http.ResponseWriter, r *http.Request) {

@@ -28,36 +28,51 @@ const fmtDay = (s) => fmtTime(s).slice(0, 10);
 
 /* ─────────── views ─────────── */
 
+const state = { username: "", role: "user", meta: { subtitle: "", mcp_url: "" } };
+
 function showLogin() {
   $("#app-view").classList.add("hidden");
   $("#login-view").classList.remove("hidden");
-  setTimeout(() => $("#login-pass").focus(), 50);
+  setTimeout(() => $("#login-user").focus(), 50);
+}
+
+function applyRole() {
+  $$("nav a[data-admin]").forEach((a) =>
+    a.classList.toggle("hidden", state.role !== "admin"));
 }
 
 function showApp() {
   $("#login-view").classList.add("hidden");
   $("#app-view").classList.remove("hidden");
+  applyRole();
   route();
 }
 
 async function boot() {
   try {
     const meta = await api("/api/meta");
+    state.meta = meta;
     $("#login-subtitle").textContent = meta.subtitle;
     $("#join-cmd").textContent =
       `claude mcp add --transport http engram-team ${meta.mcp_url} --header "Authorization: Bearer <token>"`;
   } catch { /* defaults already in markup */ }
-  try { await api("/api/whoami"); showApp(); }
-  catch { showLogin(); }
+  try {
+    const me = await api("/api/whoami");
+    state.username = me.username; state.role = me.role;
+    showApp();
+  } catch { showLogin(); }
 }
 
 $("#login-btn").onclick = doLogin;
 $("#login-pass").addEventListener("keydown", (e) => { if (e.key === "Enter") doLogin(); });
+$("#login-user").addEventListener("keydown", (e) => { if (e.key === "Enter") doLogin(); });
 
 async function doLogin() {
   $("#login-err").textContent = "";
   try {
-    await api("/api/login", { method: "POST", body: { password: $("#login-pass").value } });
+    const d = await api("/api/login", { method: "POST",
+      body: { username: $("#login-user").value, password: $("#login-pass").value } });
+    state.username = d.username; state.role = d.role;
     $("#login-pass").value = "";
     showApp();
   } catch (e) {
@@ -69,15 +84,17 @@ $("#logout-btn").onclick = async () => { await api("/api/logout", { method: "POS
 
 /* ─────────── router ─────────── */
 
-const pages = { dash: loadDash, memory: loadMemory, stats: loadStats, tokens: loadTokens };
+const pages = { me: loadMe, dash: loadDash, memory: loadMemory, stats: loadStats, tokens: loadTokens, users: loadUsers };
+const adminPages = new Set(["tokens", "users"]);
 
 function route() {
-  const p = (location.hash.replace("#/", "") || "dash");
-  const name = pages[p] ? p : "dash";
-  $$("nav a").forEach((a) => a.classList.toggle("on", a.dataset.page === name));
+  let p = (location.hash.replace("#/", "") || "me");
+  if (!pages[p]) p = "me";
+  if (adminPages.has(p) && state.role !== "admin") p = "me";
+  $$("nav a").forEach((a) => a.classList.toggle("on", a.dataset.page === p));
   $$(".page").forEach((el) => el.classList.add("hidden"));
-  $(`#page-${name}`).classList.remove("hidden");
-  pages[name]();
+  $(`#page-${p}`).classList.remove("hidden");
+  pages[p]();
 }
 window.addEventListener("hashchange", () => { if (!$("#app-view").classList.contains("hidden")) route(); });
 
@@ -130,6 +147,125 @@ function barChart(el, rows) {
       itemStyle: { color: "#1f6feb", borderRadius: [0, 4, 4, 0] },
     }],
   }, true);
+}
+
+/* ─────────── page: me (self-service) ─────────── */
+
+const meState = { token: "", revealed: false };
+
+async function loadMe() {
+  const d = await api("/api/me");
+  meState.token = d.token || "";
+  meState.revealed = false;
+  renderMeToken(d);
+  $("#me-info").innerHTML = `
+    <dt>用户名</dt><dd>${esc(d.username)}</dd>
+    <dt>角色</dt><dd>${d.role === "admin" ? "管理员" : "普通用户"}</dd>
+    <dt>创建时间</dt><dd>${esc(fmtTime(d.created_at))}</dd>
+    <dt>最近登录</dt><dd>${d.last_login ? esc(fmtTime(d.last_login)) : "—"}</dd>`;
+}
+
+function renderMeToken(d) {
+  const has = !!meState.token;
+  $("#me-token-row").classList.toggle("hidden", !has);
+  $("#me-no-token").classList.toggle("hidden", has);
+  $("#me-join-cmd").parentElement && ($("#me-join-cmd").style.display = has ? "" : "none");
+  if (!has) return;
+  const shown = meState.revealed ? meState.token : "eng_••••••••••••••••";
+  $("#me-token").textContent = shown;
+  $("#me-token-reveal").textContent = meState.revealed ? "隐藏" : "显示";
+  const revoked = d && d.token_revoked;
+  $("#me-token-state").innerHTML = revoked
+    ? ` <span class="tag off">已吊销</span>` : ` <span class="tag ok">有效</span>`;
+  $("#me-join-cmd").textContent =
+    `claude mcp add --transport http engram-team ${state.meta.mcp_url} --header "Authorization: Bearer ${meState.token}"`;
+}
+
+$("#me-token-reveal").onclick = function () {
+  meState.revealed = !meState.revealed;
+  const revoked = $("#me-token-state").textContent.includes("吊销");
+  renderMeToken(revoked ? { token_revoked: true } : { token_revoked: false });
+};
+$("#me-token-copy").onclick = function () {
+  navigator.clipboard.writeText(meState.token).then(() => (this.textContent = "已复制 ✓"));
+};
+
+async function mintOrRegen(confirmMsg) {
+  if (confirmMsg && !confirm(confirmMsg)) return;
+  try {
+    const d = await api("/api/me/token", { method: "POST" });
+    meState.token = d.token; meState.revealed = true;
+    renderMeToken({ token_revoked: false });
+  } catch (e) { alert(e.message); }
+}
+$("#me-mint").onclick = () => mintOrRegen("");
+$("#me-regen").onclick = () =>
+  mintOrRegen("重新生成后旧 key 立即失效，你的 agent 要用新命令重新配置。继续？");
+
+$("#pw-change").onclick = async () => {
+  const msg = $("#pw-msg");
+  msg.textContent = ""; msg.style.color = "";
+  try {
+    await api("/api/me/password", { method: "POST",
+      body: { old_password: $("#pw-old").value, new_password: $("#pw-new").value } });
+    msg.textContent = "已修改 ✓"; msg.style.color = "var(--green)";
+    $("#pw-old").value = ""; $("#pw-new").value = "";
+  } catch (e) { msg.textContent = e.message; msg.style.color = "var(--red)"; }
+};
+
+/* ─────────── page: users (admin) ─────────── */
+
+async function loadUsers() {
+  const d = await api("/api/users");
+  const tb = $("#u-table tbody");
+  tb.innerHTML = d.users.length ? d.users.map((u) => `
+    <tr>
+      <td style="color:var(--bright)">${esc(u.username)}</td>
+      <td>${u.role === "admin" ? "管理员" : "普通用户"}</td>
+      <td>${u.disabled ? `<span class="tag off">已禁用</span>` : `<span class="tag ok">正常</span>`}</td>
+      <td class="muted">${esc(fmtTime(u.created_at))}</td>
+      <td class="muted">${u.last_login ? esc(fmtTime(u.last_login)) : "—"}</td>
+      <td style="white-space:nowrap">
+        ${u.username !== state.username ? `
+          ${u.disabled
+            ? `<button class="link" data-act="enable" data-n="${esc(u.username)}">启用</button>`
+            : `<button class="link" data-act="disable" data-n="${esc(u.username)}">禁用</button>`}
+          <button class="link" data-act="reset" data-n="${esc(u.username)}">重置密码</button>
+          <button class="link" data-act="del" data-n="${esc(u.username)}" style="color:var(--red)">删除</button>
+        ` : `<span class="muted small">当前登录</span>`}
+      </td>
+    </tr>`).join("")
+    : `<tr><td colspan="6" class="muted" style="text-align:center;padding:30px">还没有账号</td></tr>`;
+  tb.querySelectorAll("button[data-act]").forEach((b) => (b.onclick = () => userAction(b)));
+}
+
+$("#u-create").onclick = async () => {
+  const username = $("#u-name").value.trim(), password = $("#u-pass").value;
+  if (!username || !password) { alert("用户名和初始密码都要填"); return; }
+  try {
+    await api("/api/users", { method: "POST", body: { username, password, role: "user" } });
+    $("#u-name").value = ""; $("#u-pass").value = "";
+    loadUsers();
+  } catch (e) { alert(e.message); }
+};
+
+async function userAction(b) {
+  const name = b.dataset.n, act = b.dataset.act;
+  try {
+    if (act === "disable" && confirm(`禁用 ${name}？他立即掉线且无法再登录（agent key 不受影响，可另行吊销）。`)) {
+      await api(`/api/users/${name}/disable`, { method: "POST" });
+    } else if (act === "enable") {
+      await api(`/api/users/${name}/enable`, { method: "POST" });
+    } else if (act === "reset") {
+      const pw = prompt(`给 ${name} 设置新密码（至少 8 位）：`);
+      if (pw === null) return;
+      await api(`/api/users/${name}/reset-password`, { method: "POST", body: { password: pw } });
+      alert("已重置，对方所有会话已强制下线。");
+    } else if (act === "del" && confirm(`删除 ${name}？他的账号和 agent key 都会被删除，不可恢复。`)) {
+      await api(`/api/users/${name}`, { method: "DELETE" });
+    } else { return; }
+    loadUsers();
+  } catch (e) { alert(e.message); }
 }
 
 /* ─────────── page: dash ─────────── */

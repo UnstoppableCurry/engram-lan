@@ -8,8 +8,8 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -27,6 +27,7 @@ type config struct {
 	Addr        string
 	DBPath      string
 	TokensFile  string
+	AdminDB     string
 	PassBcrypt  string
 	SessionTTL  time.Duration
 	DevPassword string // plaintext fallback, dev only
@@ -51,6 +52,7 @@ func loadConfig() config {
 		Addr:        envOr("ENGRAM_ADMIN_ADDR", ":7441"),
 		DBPath:      envOr("ENGRAM_DB", "/var/lib/engram-mcp/.engram/engram.db"),
 		TokensFile:  envOr("ENGRAM_TOKENS_FILE", "/etc/engram-mcp/tokens.json"),
+		AdminDB:     envOr("ENGRAM_ADMIN_DB", "/etc/engram-mcp/admin.db"),
 		PassBcrypt:  strings.TrimSpace(os.Getenv("ENGRAM_ADMIN_PASS_BCRYPT")),
 		SessionTTL:  ttl,
 		DevPassword: strings.TrimSpace(os.Getenv("ENGRAM_ADMIN_PASSWORD")),
@@ -82,10 +84,27 @@ func main() {
 		log.Fatalf("open token store: %v", err)
 	}
 
+	users, err := openUserStore(cfg.AdminDB)
+	if err != nil {
+		log.Fatalf("open user store: %v", err)
+	}
+	defer users.Close()
+	// seed the initial admin from env (bcrypt preferred, dev password hashed on the fly)
+	seedHash := cfg.PassBcrypt
+	if seedHash == "" {
+		if h, err := bcrypt.GenerateFromPassword([]byte(cfg.DevPassword), bcrypt.DefaultCost); err == nil {
+			seedHash = string(h)
+		}
+	}
+	if err := users.seedAdmin(seedHash); err != nil {
+		log.Fatalf("seed admin: %v", err)
+	}
+
 	srv := &server{
 		cfg:     cfg,
 		db:      db,
 		tokens:  tokens,
+		users:   users,
 		session: newSessionStore(cfg.SessionTTL),
 		limiter: newLoginLimiter(5, 5*time.Minute),
 	}
@@ -97,20 +116,35 @@ func main() {
 	mux.HandleFunc("POST /api/login", srv.handleLogin)
 	mux.HandleFunc("POST /api/logout", srv.handleLogout)
 	mux.HandleFunc("GET /api/whoami", srv.withAuth(srv.handleWhoami))
-	// read-only memory APIs
+	// read-only memory APIs (any logged-in role)
 	mux.HandleFunc("GET /api/stats/overview", srv.withAuth(srv.handleStatsOverview))
 	mux.HandleFunc("GET /api/stats/timeseries", srv.withAuth(srv.handleStatsTimeseries))
 	mux.HandleFunc("GET /api/stats/breakdown", srv.withAuth(srv.handleStatsBreakdown))
 	mux.HandleFunc("GET /api/stats/topics", srv.withAuth(srv.handleStatsTopics))
 	mux.HandleFunc("GET /api/memories", srv.withAuth(srv.handleMemories))
 	mux.HandleFunc("GET /api/memories/{id}", srv.withAuth(srv.handleMemoryDetail))
-	// token management APIs
-	mux.HandleFunc("GET /api/tokens", srv.withAuth(srv.handleTokenList))
-	mux.HandleFunc("POST /api/tokens", srv.withAuth(srv.handleTokenCreate))
-	mux.HandleFunc("POST /api/tokens/{name}/revoke", srv.withAuth(srv.handleTokenRevoke))
-	mux.HandleFunc("POST /api/tokens/{name}/unrevoke", srv.withAuth(srv.handleTokenUnrevoke))
-	mux.HandleFunc("PATCH /api/tokens/{name}", srv.withAuth(srv.handleTokenPatch))
-	mux.HandleFunc("DELETE /api/tokens/{name}", srv.withAuth(srv.handleTokenDelete))
+	// self-service (any logged-in role)
+	mux.HandleFunc("GET /api/me", srv.withAuth(srv.handleMe))
+	mux.HandleFunc("POST /api/me/password", srv.withAuth(srv.handleMePassword))
+	mux.HandleFunc("POST /api/me/token", srv.withAuth(srv.handleMeToken))
+	// token management APIs (admin only)
+	mux.HandleFunc("GET /api/tokens", srv.withAdmin(srv.handleTokenList))
+	mux.HandleFunc("POST /api/tokens", srv.withAdmin(srv.handleTokenCreate))
+	mux.HandleFunc("POST /api/tokens/{name}/revoke", srv.withAdmin(srv.handleTokenRevoke))
+	mux.HandleFunc("POST /api/tokens/{name}/unrevoke", srv.withAdmin(srv.handleTokenUnrevoke))
+	mux.HandleFunc("PATCH /api/tokens/{name}", srv.withAdmin(srv.handleTokenPatch))
+	mux.HandleFunc("DELETE /api/tokens/{name}", srv.withAdmin(srv.handleTokenDelete))
+	// user management APIs (admin only)
+	mux.HandleFunc("GET /api/users", srv.withAdmin(srv.handleUserList))
+	mux.HandleFunc("POST /api/users", srv.withAdmin(srv.handleUserCreate))
+	mux.HandleFunc("POST /api/users/{name}/disable", srv.withAdmin(func(w http.ResponseWriter, r *http.Request) {
+		srv.handleUserSetDisabled(w, r, true)
+	}))
+	mux.HandleFunc("POST /api/users/{name}/enable", srv.withAdmin(func(w http.ResponseWriter, r *http.Request) {
+		srv.handleUserSetDisabled(w, r, false)
+	}))
+	mux.HandleFunc("POST /api/users/{name}/reset-password", srv.withAdmin(srv.handleUserResetPassword))
+	mux.HandleFunc("DELETE /api/users/{name}", srv.withAdmin(srv.handleUserDelete))
 	// health and display meta, unauthenticated
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "service": "engram-admin"})
@@ -164,25 +198,31 @@ func writeErr(w http.ResponseWriter, code int, msg string) {
 
 // ---------- sessions ----------
 
+type sessionEntry struct {
+	username string
+	role     string
+	expiry   time.Time
+}
+
 type sessionStore struct {
 	mu   sync.Mutex
 	ttl  time.Duration
-	data map[string]time.Time // token -> expiry
+	data map[string]sessionEntry // token -> entry
 }
 
 func newSessionStore(ttl time.Duration) *sessionStore {
-	return &sessionStore{ttl: ttl, data: map[string]time.Time{}}
+	return &sessionStore{ttl: ttl, data: map[string]sessionEntry{}}
 }
 
-func (s *sessionStore) create() string {
+func (s *sessionStore) create(username, role string) string {
 	b := make([]byte, 32)
 	_, _ = rand.Read(b)
 	tok := base64.RawURLEncoding.EncodeToString(b)
 	s.mu.Lock()
-	s.data[tok] = time.Now().Add(s.ttl)
+	s.data[tok] = sessionEntry{username: username, role: role, expiry: time.Now().Add(s.ttl)}
 	// opportunistic GC
-	for k, exp := range s.data {
-		if time.Now().After(exp) {
+	for k, e := range s.data {
+		if time.Now().After(e.expiry) {
 			delete(s.data, k)
 		}
 	}
@@ -190,16 +230,26 @@ func (s *sessionStore) create() string {
 	return tok
 }
 
-func (s *sessionStore) valid(tok string) bool {
+func (s *sessionStore) valid(tok string) (sessionEntry, bool) {
 	s.mu.Lock()
-	exp, ok := s.data[tok]
+	e, ok := s.data[tok]
 	s.mu.Unlock()
-	return ok && time.Now().Before(exp)
+	return e, ok && time.Now().Before(e.expiry)
 }
 
 func (s *sessionStore) drop(tok string) {
 	s.mu.Lock()
 	delete(s.data, tok)
+	s.mu.Unlock()
+}
+
+func (s *sessionStore) dropByUser(username string) {
+	s.mu.Lock()
+	for k, e := range s.data {
+		if e.username == username {
+			delete(s.data, k)
+		}
+	}
 	s.mu.Unlock()
 }
 
@@ -242,16 +292,18 @@ type server struct {
 	cfg     config
 	db      *store
 	tokens  *tokenStore
+	users   *userStore
 	session *sessionStore
 	limiter *loginLimiter
 }
 
-func (s *server) checkPassword(pw string) bool {
-	if s.cfg.PassBcrypt != "" {
-		return bcrypt.CompareHashAndPassword([]byte(s.cfg.PassBcrypt), []byte(pw)) == nil
-	}
-	// dev fallback, constant-time
-	return subtle.ConstantTimeCompare([]byte(pw), []byte(s.cfg.DevPassword)) == 1
+// ctxKey is the context key for the authenticated session entry.
+type ctxKey struct{}
+
+var sessionKey ctxKey
+
+func sessionOf(r *http.Request) sessionEntry {
+	return r.Context().Value(sessionKey).(sessionEntry)
 }
 
 func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -262,19 +314,23 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
+		Username string `json:"username"`
 		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	if !s.checkPassword(body.Password) {
+	username := strings.ToLower(strings.TrimSpace(body.Username))
+	u, ok := s.users.checkPassword(username, body.Password)
+	if !ok {
 		s.limiter.record(ip)
-		log.Printf("login failed ip=%s", ip)
-		writeErr(w, http.StatusUnauthorized, "密码错误")
+		log.Printf("login failed user=%q ip=%s", username, ip)
+		writeErr(w, http.StatusUnauthorized, "用户名或密码错误")
 		return
 	}
-	tok := s.session.create()
+	tok := s.session.create(u.Username, u.Role)
+	s.users.touchLogin(u.Username)
 	http.SetCookie(w, &http.Cookie{
 		Name:     "engram_admin_session",
 		Value:    tok,
@@ -283,8 +339,8 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   int(s.cfg.SessionTTL.Seconds()),
 	})
-	log.Printf("login ok ip=%s", ip)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	log.Printf("login ok user=%s role=%s ip=%s", u.Username, u.Role, ip)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "username": u.Username, "role": u.Role})
 }
 
 func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -302,18 +358,35 @@ func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleWhoami(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"user": "admin"})
+	e := sessionOf(r)
+	writeJSON(w, http.StatusOK, map[string]any{"username": e.username, "role": e.role})
 }
 
 func (s *server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		c, err := r.Cookie("engram_admin_session")
-		if err != nil || !s.session.valid(c.Value) {
+		var e sessionEntry
+		var ok bool
+		if err == nil {
+			e, ok = s.session.valid(c.Value)
+		}
+		if !ok {
 			writeErr(w, http.StatusUnauthorized, "未登录或会话已过期")
 			return
 		}
-		next(w, r)
+		next(w, r.WithContext(context.WithValue(r.Context(), sessionKey, e)))
 	}
+}
+
+// withAdmin restricts a route to admin-role sessions.
+func (s *server) withAdmin(next http.HandlerFunc) http.HandlerFunc {
+	return s.withAuth(func(w http.ResponseWriter, r *http.Request) {
+		if sessionOf(r).role != "admin" {
+			writeErr(w, http.StatusForbidden, "需要管理员权限")
+			return
+		}
+		next(w, r)
+	})
 }
 
 func clientIP(r *http.Request) string {

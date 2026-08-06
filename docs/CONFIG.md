@@ -49,10 +49,18 @@ Endpoints: `/mcp` (auth required), `/healthz` (open).
 | `ENGRAM_ADMIN_PASSWORD` | — | Plaintext password, **dev only**. Ignored when the bcrypt var is set. |
 | `ENGRAM_ADMIN_SESSION_TTL` | `12h` | Login session lifetime (in-memory sessions; restart = re-login). |
 | `ENGRAM_ADMIN_SUBTITLE` | `LAN shared memory hub` | Login page subtitle. |
-| `ENGRAM_ADMIN_MCP_URL` | `http://127.0.0.1:7440/mcp` | MCP URL shown in the client onboarding hint. |
+| `ENGRAM_ADMIN_MCP_URL` | `http://127.0.0.1:7440/mcp` | MCP URL shown in the client onboarding hint and in each member's copy-ready `claude mcp add` command. |
+| `ENGRAM_ADMIN_DB` | `/etc/engram-mcp/admin.db` | Panel-owned SQLite for the account system (users, roles, bcrypt hashes). The directory must be writable by the panel user. |
+
+### Accounts & roles · 账号与角色
+
+- On first start with an empty `ENGRAM_ADMIN_DB`, the panel seeds one **admin** account: username `admin`, password from `ENGRAM_ADMIN_PASS_BCRYPT` (or `ENGRAM_ADMIN_PASSWORD` in dev).
+- Admin creates member accounts in the **用户管理 / Users** page. Members log in with username + password and use **我的 Key / My Key** to mint or regenerate their own agent token (name = username, written to the same token list file, hot-reloaded by the server).
+- Deleting a user also deletes their token; disabling a user kills their sessions immediately. Admin cannot disable/delete itself.
+- All `/api/users*` and `/api/tokens*` endpoints require role=admin (403 for members). `/api/me*` requires any valid session.
 
 Endpoints: `GET /` (UI), `POST /api/login`, `POST /api/logout`, `GET /api/meta`, `GET /healthz` — open;
-everything under `/api/stats/*`, `/api/memories*`, `/api/tokens*` — session required.
+everything under `/api/stats/*`, `/api/memories*`, `/api/me*`, `/api/tokens*`, `/api/users*` — session required.
 
 ### Panel API summary
 
@@ -64,11 +72,19 @@ everything under `/api/stats/*`, `/api/memories*`, `/api/tokens*` — session re
 | `GET /api/stats/topics?limit=N` | topic_key ranking by revision count |
 | `GET /api/memories?q=&project=&type=&page=&size=` | Browse or FTS5 search (BM25), paginated |
 | `GET /api/memories/{id}` | Full record incl. content |
-| `GET /api/tokens` | List tokens (suffix only — full token is never returned after creation) |
-| `POST /api/tokens` | Issue `{name, note}` → returns the full token **exactly once** |
-| `POST /api/tokens/{name}/revoke` · `unrevoke` | Disable / re-enable |
-| `PATCH /api/tokens/{name}` | Update note |
-| `DELETE /api/tokens/{name}` | Remove permanently |
+| `GET /api/me` | Current account: role, dates, own full token (owner-only by design) |
+| `POST /api/me/password` | Change own password `{old_password, new_password}` |
+| `POST /api/me/token` | Mint or regenerate own agent token → returns full token **exactly once per call** |
+| `GET /api/users` | (admin) List accounts |
+| `POST /api/users` | (admin) Create `{username, password}` |
+| `POST /api/users/{name}/disable` · `enable` | (admin) Disable / re-enable (kills sessions immediately) |
+| `POST /api/users/{name}/reset-password` | (admin) Set a new password |
+| `DELETE /api/users/{name}` | (admin) Delete account **and** its agent token |
+| `GET /api/tokens` | (admin) List tokens (suffix only — full token is never returned after creation) |
+| `POST /api/tokens` | (admin) Issue `{name, note}` → returns the full token **exactly once** |
+| `POST /api/tokens/{name}/revoke` · `unrevoke` | (admin) Disable / re-enable |
+| `PATCH /api/tokens/{name}` | (admin) Update note |
+| `DELETE /api/tokens/{name}` | (admin) Remove permanently |
 
 ## 4. Filesystem layout · 文件与权限
 
@@ -79,6 +95,7 @@ everything under `/api/stats/*`, `/api/memories*`, `/api/tokens*` — session re
 | `…/.engram/engram.db*` | `engram:engram` | `640` | DB + WAL/SHM; group read = panel's only access |
 | `/etc/engram-mcp` | `engramadm:engram` | `750` | Config dir (panel needs write for atomic token writes) |
 | `/etc/engram-mcp/tokens.json` | `engramadm:engram` | `660` | Token list: panel writes, server reads via group |
+| `/etc/engram-mcp/admin.db*` | `engramadm:engramadm` | `600` | Panel account database (users/roles/bcrypt), created on first run |
 | `/etc/engram-mcp/admin.env` | `engramadm:engramadm` | `600` | `ENGRAM_ADMIN_PASS_BCRYPT=…` |
 | `/etc/engram-mcp.env` | `root:root` | `600` | Server env (EnvironmentFile of engram-mcp.service) |
 
