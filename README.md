@@ -33,25 +33,25 @@ Upstream's `engram cloud serve` is a **sync backend** (Postgres + JWT): every cl
 
 | Overview dashboard | Memory browser |
 |---|---|
-| ![dashboard](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@main/docs/assets/dash.png) | ![memory](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@main/docs/assets/memory.png) |
+| ![dashboard](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@6885054a10668f4f1e49f1a74b9442cbaaca829c/docs/assets/dash.png) | ![memory](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@6885054a10668f4f1e49f1a74b9442cbaaca829c/docs/assets/memory.png) |
 
 | Memory detail | Statistics |
 |---|---|
-| ![detail](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@main/docs/assets/detail.png) | ![stats](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@main/docs/assets/stats.png) |
+| ![detail](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@6885054a10668f4f1e49f1a74b9442cbaaca829c/docs/assets/detail.png) | ![stats](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@6885054a10668f4f1e49f1a74b9442cbaaca829c/docs/assets/stats.png) |
 
 ### In action
 
 **Panel tour — dashboard, trends, browsing, detail:**
 
-![tour](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@main/docs/assets/tour.gif)
+![tour](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@6885054a10668f4f1e49f1a74b9442cbaaca829c/docs/assets/tour.gif)
 
 **Issue a per-person token, revoke it — effective immediately, no restart:**
 
-![tokens](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@main/docs/assets/tokens.gif)
+![tokens](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@6885054a10668f4f1e49f1a74b9442cbaaca829c/docs/assets/tokens.gif)
 
 **Full-text search (SQLite FTS5, BM25-ranked):**
 
-![search](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@main/docs/assets/search.gif)
+![search](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@6885054a10668f4f1e49f1a74b9442cbaaca829c/docs/assets/search.gif)
 
 ### Architecture
 
@@ -152,25 +152,25 @@ No TLS — it is plain HTTP inside your LAN. Do not expose either port outside i
 
 | 总览大盘 | Memory 浏览 |
 |---|---|
-| ![dashboard](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@main/docs/assets/dash.png) | ![memory](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@main/docs/assets/memory.png) |
+| ![dashboard](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@6885054a10668f4f1e49f1a74b9442cbaaca829c/docs/assets/dash.png) | ![memory](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@6885054a10668f4f1e49f1a74b9442cbaaca829c/docs/assets/memory.png) |
 
 | 记忆详情 | 统计分析 |
 |---|---|
-| ![detail](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@main/docs/assets/detail.png) | ![stats](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@main/docs/assets/stats.png) |
+| ![detail](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@6885054a10668f4f1e49f1a74b9442cbaaca829c/docs/assets/detail.png) | ![stats](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@6885054a10668f4f1e49f1a74b9442cbaaca829c/docs/assets/stats.png) |
 
 ### 动图演示
 
 **面板全流程 —— 大盘、趋势切换、浏览、详情：**
 
-![tour](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@main/docs/assets/tour.gif)
+![tour](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@6885054a10668f4f1e49f1a74b9442cbaaca829c/docs/assets/tour.gif)
 
 **按人签发 token、吊销 —— 立即生效，无需重启：**
 
-![tokens](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@main/docs/assets/tokens.gif)
+![tokens](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@6885054a10668f4f1e49f1a74b9442cbaaca829c/docs/assets/tokens.gif)
 
 **全文搜索（SQLite FTS5，BM25 打分）：**
 
-![search](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@main/docs/assets/search.gif)
+![search](https://cdn.jsdelivr.net/gh/UnstoppableCurry/engram-lan@6885054a10668f4f1e49f1a74b9442cbaaca829c/docs/assets/search.gif)
 
 ### 架构
 
