@@ -1,0 +1,226 @@
+diff --git a/cmd/engram/main.go b/cmd/engram/main.go
+index 730d783..c791352 100644
+--- a/cmd/engram/main.go
++++ b/cmd/engram/main.go
+@@ -13,10 +13,12 @@ package main
+ import (
+ 	"bufio"
+ 	"context"
++	"crypto/subtle"
+ 	"encoding/json"
+ 	"errors"
+ 	"fmt"
+ 	"log"
++	"net/http"
+ 	"os"
+ 	"os/signal"
+ 	"path/filepath"
+@@ -24,6 +26,7 @@ import (
+ 	"sort"
+ 	"strconv"
+ 	"strings"
++	"sync"
+ 	"syscall"
+ 	"time"
+ 
+@@ -847,12 +850,27 @@ func tryStartAutosync(ctx context.Context, s *store.Store, cfg store.Config) (au
+ func cmdMCP(cfg store.Config) {
+ 	toolsFilter := ""
+ 	projectOverride := strings.TrimSpace(os.Getenv("ENGRAM_PROJECT"))
++	httpAddr := strings.TrimSpace(os.Getenv("ENGRAM_MCP_HTTP"))
+ 	for i := 2; i < len(os.Args); i++ {
+ 		if strings.HasPrefix(os.Args[i], "--tools=") {
+ 			toolsFilter = strings.TrimPrefix(os.Args[i], "--tools=")
+ 		} else if os.Args[i] == "--tools" && i+1 < len(os.Args) {
+ 			toolsFilter = os.Args[i+1]
+ 			i++
++		} else if strings.HasPrefix(os.Args[i], "--http=") {
++			httpAddr = strings.TrimSpace(strings.TrimPrefix(os.Args[i], "--http="))
++			if httpAddr == "" {
++				fatal(fmt.Errorf("--http requires a value like :7440 or 0.0.0.0:7440"))
++			}
++		} else if os.Args[i] == "--http" {
++			if i+1 >= len(os.Args) {
++				fatal(fmt.Errorf("--http requires a value like :7440 or 0.0.0.0:7440"))
++			}
++			httpAddr = strings.TrimSpace(os.Args[i+1])
++			if httpAddr == "" {
++				fatal(fmt.Errorf("--http requires a value like :7440 or 0.0.0.0:7440"))
++			}
++			i++
+ 		} else if strings.HasPrefix(os.Args[i], "--project=") {
+ 			projectOverride = strings.TrimSpace(strings.TrimPrefix(os.Args[i], "--project="))
+ 			if projectOverride == "" {
+@@ -898,12 +916,172 @@ func cmdMCP(cfg store.Config) {
+ 	allowlist := resolveMCPTools(toolsFilter)
+ 	mcpSrv := newMCPServerWithConfig(s, mcpCfg, allowlist)
+ 
++	// Network transport: one server process owns the SQLite file and serves
++	// many remote agents over streamable HTTP. Without --http the behaviour is
++	// unchanged (stdio, one process per agent).
++	if httpAddr != "" {
++		httpSrv := mcpserver.NewStreamableHTTPServer(mcpSrv,
++			mcpserver.WithHeartbeatInterval(25*time.Second),
++		)
++
++		var handler http.Handler = httpSrv
++		token := strings.TrimSpace(os.Getenv("ENGRAM_MCP_TOKEN"))
++		tokensFile := strings.TrimSpace(os.Getenv("ENGRAM_MCP_TOKENS_FILE"))
++		switch {
++		case tokensFile != "":
++			// Multi-account mode: a JSON name->token list, reloaded when the
++			// file changes so the admin panel can issue/revoke without a
++			// restart. Fail-closed: a missing or corrupt file denies all.
++			handler = requireTokenListAuth(handler, loadTokenList(tokensFile))
++			log.Printf("[engram] MCP bearer-token auth enabled (token list: %s)", tokensFile)
++		case token != "":
++			handler = requireBearerToken(handler, token)
++			log.Printf("[engram] MCP bearer-token auth enabled")
++		default:
++			log.Printf("[engram] WARNING: no ENGRAM_MCP_TOKEN set — every host that can reach %s has full read/write access", httpAddr)
++		}
++
++		mux := http.NewServeMux()
++		mux.Handle("/mcp", handler)
++		mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
++			w.Header().Set("Content-Type", "application/json")
++			fmt.Fprintf(w, "{\"status\":\"ok\",\"service\":\"engram-mcp\",\"version\":%q}\n", version)
++		})
++
++		log.Printf("[engram] MCP streamable-http listening on %s/mcp", httpAddr)
++		if err := http.ListenAndServe(httpAddr, mux); err != nil {
++			stopAutosync()
++			fatal(err)
++		}
++		return
++	}
++
+ 	if err := serveMCP(mcpSrv); err != nil {
+ 		stopAutosync()
+ 		fatal(err)
+ 	}
+ }
+ 
++// requireBearerToken rejects requests that do not carry the shared token.
++// Accepts either `Authorization: Bearer <token>` or `X-Engram-Token: <token>`.
++// Comparison is constant-time so a wrong token leaks no timing information.
++func requireBearerToken(next http.Handler, token string) http.Handler {
++	want := []byte(token)
++	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		got := strings.TrimSpace(r.Header.Get("X-Engram-Token"))
++		if got == "" {
++			got = strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
++		}
++		if subtle.ConstantTimeCompare([]byte(got), want) != 1 {
++			log.Printf("[engram] 401 %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
++			w.Header().Set("WWW-Authenticate", `Bearer realm="engram"`)
++			http.Error(w, "unauthorized", http.StatusUnauthorized)
++			return
++		}
++		next.ServeHTTP(w, r)
++	})
++}
++
++// tokenRecord is one entry in the token list file. Extra fields in the JSON
++// (note, created_at, …) are owned by the admin panel and ignored here.
++type tokenRecord struct {
++	Token   string `json:"token"`
++	Revoked bool   `json:"revoked"`
++}
++
++// tokenList is the set of valid bearer tokens, backed by a JSON file that is
++// reloaded whenever its mtime/size changes. It is safe for concurrent use.
++type tokenList struct {
++	path    string
++	mu      sync.Mutex
++	modTime time.Time
++	size    int64
++	tokens  map[string]tokenRecord
++	loadErr error
++}
++
++func loadTokenList(path string) *tokenList {
++	t := &tokenList{path: path}
++	t.reload(true)
++	if t.loadErr != nil {
++		log.Printf("[engram] WARNING: token list %s not readable yet (%v) — all requests will be 401 until it is", path, t.loadErr)
++	}
++	return t
++}
++
++func (t *tokenList) reload(force bool) {
++	fi, err := os.Stat(t.path)
++	t.mu.Lock()
++	defer t.mu.Unlock()
++	if err != nil {
++		t.tokens = nil
++		t.loadErr = err
++		return
++	}
++	if !force && !fi.ModTime().After(t.modTime) && fi.Size() == t.size {
++		return
++	}
++	data, err := os.ReadFile(t.path)
++	if err != nil {
++		t.tokens = nil
++		t.loadErr = err
++		return
++	}
++	var m map[string]tokenRecord
++	if err := json.Unmarshal(data, &m); err != nil {
++		t.tokens = nil
++		t.loadErr = fmt.Errorf("token list %s is not valid JSON: %w", t.path, err)
++		log.Printf("[engram] %v — keeping auth fail-closed", t.loadErr)
++		return
++	}
++	t.tokens = m
++	t.modTime = fi.ModTime()
++	t.size = fi.Size()
++	t.loadErr = nil
++	log.Printf("[engram] token list reloaded: %d entries", len(m))
++}
++
++// check reports whether got is a known, non-revoked token. Any load problem
++// fails closed. Comparison runs over every entry in constant time per entry,
++// so a wrong token leaks neither timing nor which entry it nearly matched.
++func (t *tokenList) check(got string) bool {
++	t.reload(false)
++	t.mu.Lock()
++	defer t.mu.Unlock()
++	if t.loadErr != nil || got == "" {
++		return false
++	}
++	matchedRevoked := false
++	ok := false
++	for _, rec := range t.tokens {
++		if subtle.ConstantTimeCompare([]byte(got), []byte(rec.Token)) == 1 {
++			if rec.Revoked {
++				matchedRevoked = true
++			} else {
++				ok = true
++			}
++		}
++	}
++	return ok && !matchedRevoked
++}
++
++// requireTokenListAuth is the token-list variant of requireBearerToken.
++func requireTokenListAuth(next http.Handler, list *tokenList) http.Handler {
++	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		got := strings.TrimSpace(r.Header.Get("X-Engram-Token"))
++		if got == "" {
++			got = strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
++		}
++		if !list.check(got) {
++			log.Printf("[engram] 401 %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
++			w.Header().Set("WWW-Authenticate", `Bearer realm="engram"`)
++			http.Error(w, "unauthorized", http.StatusUnauthorized)
++			return
++		}
++		next.ServeHTTP(w, r)
++	})
++}
++
+ func cmdTUI(cfg store.Config) {
+ 	s, err := storeNew(cfg)
+ 	if err != nil {

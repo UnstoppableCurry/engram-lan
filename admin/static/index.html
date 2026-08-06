@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>engram 管理面板</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ───────── 登录 ───────── -->
+<div id="login-view" class="hidden">
+  <div class="login-card">
+    <h1>engram 管理面板</h1>
+    <p class="muted" id="login-subtitle">LAN shared memory hub</p>
+    <input id="login-pass" type="password" placeholder="管理员密码" autocomplete="current-password">
+    <button id="login-btn">登 录</button>
+    <p id="login-err" class="err"></p>
+  </div>
+</div>
+
+<!-- ───────── 主界面 ───────── -->
+<div id="app-view" class="hidden">
+  <aside>
+    <div class="brand">engram<span>admin</span></div>
+    <nav>
+      <a href="#/dash"    data-page="dash">总览</a>
+      <a href="#/memory"  data-page="memory">Memory</a>
+      <a href="#/stats"   data-page="stats">统计分析</a>
+      <a href="#/tokens"  data-page="tokens">Token 管理</a>
+    </nav>
+    <button id="logout-btn" class="ghost">退出登录</button>
+  </aside>
+
+  <main>
+    <!-- 总览 -->
+    <section id="page-dash" class="page">
+      <h2>总览</h2>
+      <div class="cards" id="dash-cards"></div>
+      <div class="panel">
+        <div class="panel-head">
+          <h3>写入趋势</h3>
+          <div class="seg" id="ts-seg">
+            <button data-days="30" class="on">30 天</button><button data-days="90">90 天</button><button data-days="180">180 天</button>
+          </div>
+        </div>
+        <div id="chart-ts" class="chart tall"></div>
+      </div>
+      <div class="grid2">
+        <div class="panel"><h3>类型分布</h3><div id="chart-type" class="chart"></div></div>
+        <div class="panel"><h3>项目分布</h3><div id="chart-project" class="chart"></div></div>
+      </div>
+    </section>
+
+    <!-- Memory 浏览 -->
+    <section id="page-memory" class="page hidden">
+      <h2>Memory</h2>
+      <div class="toolbar">
+        <input id="mem-q" type="search" placeholder="全文搜索标题和正文…">
+        <select id="mem-project"><option value="">全部项目</option></select>
+        <select id="mem-type"><option value="">全部类型</option></select>
+        <button id="mem-search">搜索</button>
+      </div>
+      <div class="panel">
+        <table class="tbl" id="mem-table">
+          <thead><tr>
+            <th>时间</th><th>项目</th><th>类型</th><th>标题</th><th>版本</th><th>置顶</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="pager">
+          <span id="mem-total" class="muted"></span>
+          <button id="mem-prev">‹ 上一页</button>
+          <span id="mem-page" class="muted"></span>
+          <button id="mem-next">下一页 ›</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 统计分析 -->
+    <section id="page-stats" class="page hidden">
+      <h2>统计分析</h2>
+      <div class="grid2">
+        <div class="panel"><h3>scope 分布</h3><div id="chart-scope" class="chart"></div></div>
+        <div class="panel"><h3>去重拦截（duplicate_count 合计）</h3><div id="stat-dup" class="big-num"></div>
+          <p class="muted small">被内容哈希拦下的重复保存次数 —— 没有它，库里会多这么多条重复。</p></div>
+      </div>
+      <div class="panel">
+        <h3>主题排行（按修订次数）</h3>
+        <table class="tbl" id="topic-table">
+          <thead><tr><th>topic_key</th><th>标题</th><th>项目</th><th>修订</th><th>重复</th><th>最近更新</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Token 管理 -->
+    <section id="page-tokens" class="page hidden">
+      <h2>Token 管理</h2>
+      <div class="toolbar">
+        <input id="tok-name" type="text" placeholder="同事名字，如 alice">
+        <input id="tok-note" type="text" placeholder="备注（可选）">
+        <button id="tok-create">签发新 token</button>
+      </div>
+      <div class="panel">
+        <table class="tbl" id="tok-table">
+          <thead><tr><th>名字</th><th>备注</th><th>token 尾号</th><th>创建时间</th><th>状态</th><th>操作</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="muted small">
+        完整 token 只在签发时显示一次。吊销立即生效，不用重启任何服务。
+        接入命令：<code id="join-cmd">claude mcp add --transport http engram-team &lt;mcp-url&gt; --header "Authorization: Bearer &lt;token&gt;"</code>
+      </p>
+    </section>
+  </main>
+</div>
+
+<!-- ───────── 弹窗 ───────── -->
+<div id="modal-mask" class="hidden">
+  <div id="modal">
+    <button id="modal-close">✕</button>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<script src="echarts.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

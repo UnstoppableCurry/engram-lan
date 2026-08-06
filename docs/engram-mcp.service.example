@@ -1,0 +1,19 @@
+[Unit]
+Description=engram LAN MCP server (patched, token-list auth)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=engram
+Group=engram
+EnvironmentFile=/etc/engram-mcp.env
+ExecStart=/usr/local/bin/engram mcp --http 0.0.0.0:7440 --project=team-kb
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,5 @@
+# build outputs
+admin/engram-admin*
+!admin/static/
+.DS_Store
+*.log

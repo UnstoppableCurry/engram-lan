@@ -1,0 +1,172 @@
+# Configuration Reference · 配置参考
+
+Everything both services read, write, and listen on. / 两个服务的全部输入输出。
+
+## 1. Components · 组件
+
+| Component | Binary | Default port | Runs as |
+|---|---|---|---|
+| engram MCP server (patched) | `/usr/local/bin/engram` | `7440` | system user `engram` |
+| Admin panel | `/usr/local/bin/engram-admin` | `7441` | system user `engramadm` (member of group `engram`) |
+
+## 2. engram server (patch v2) · 服务端环境变量
+
+| Variable | Required | Meaning |
+|---|---|---|
+| `ENGRAM_MCP_HTTP` / `--http <addr>` | yes (for LAN mode) | Listen address, e.g. `0.0.0.0:7440`. Without it the binary is 100% upstream stdio behavior. |
+| `ENGRAM_MCP_TOKENS_FILE` | one of the two | Path to the token list JSON. Enables multi-account auth with hot reload. |
+| `ENGRAM_MCP_TOKEN` | one of the two | Single shared token (legacy fallback, used only when the list file var is unset). |
+| `ENGRAM_PROJECT` / `--project <name>` | recommended | Default project for writes that do not specify one. |
+| `ENGRAM_DATA_DIR` | yes | Data directory containing `engram.db`. |
+
+Endpoints: `/mcp` (auth required), `/healthz` (open).
+
+### Token list file format
+
+```json
+{
+  "alice": {
+    "token": "eng_X7k…",
+    "revoked": false,
+    "created_at": "2026-08-06T07:59:07Z",
+    "note": "backend team"
+  }
+}
+```
+
+- The server reads only `token` and `revoked`; other fields belong to the panel.
+- The file is reloaded automatically when its mtime/size changes — issue/revoke needs **no restart**.
+- Missing or invalid file → **fail-closed**: every request gets 401 until the file is readable again.
+
+## 3. Admin panel · 面板环境变量
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `ENGRAM_ADMIN_ADDR` | `:7441` | Listen address. |
+| `ENGRAM_DB` | `/var/lib/engram-mcp/.engram/engram.db` | engram SQLite file, opened strictly `mode=ro`. |
+| `ENGRAM_TOKENS_FILE` | `/etc/engram-mcp/tokens.json` | Token list the panel manages (the **only** file it may write). |
+| `ENGRAM_ADMIN_PASS_BCRYPT` | — | bcrypt hash of the admin password. Generate with `engram-admin hashpw` (password on stdin). |
+| `ENGRAM_ADMIN_PASSWORD` | — | Plaintext password, **dev only**. Ignored when the bcrypt var is set. |
+| `ENGRAM_ADMIN_SESSION_TTL` | `12h` | Login session lifetime (in-memory sessions; restart = re-login). |
+| `ENGRAM_ADMIN_SUBTITLE` | `LAN shared memory hub` | Login page subtitle. |
+| `ENGRAM_ADMIN_MCP_URL` | `http://127.0.0.1:7440/mcp` | MCP URL shown in the client onboarding hint. |
+
+Endpoints: `GET /` (UI), `POST /api/login`, `POST /api/logout`, `GET /api/meta`, `GET /healthz` — open;
+everything under `/api/stats/*`, `/api/memories*`, `/api/tokens*` — session required.
+
+### Panel API summary
+
+| Method & path | Purpose |
+|---|---|
+| `GET /api/stats/overview` | Totals: memories, sessions, projects, prompts, pinned, duplicates intercepted, DB size, last write |
+| `GET /api/stats/timeseries?days=N` | Per-day write counts (N ≤ 366, gaps zero-filled) |
+| `GET /api/stats/breakdown` | Counts by type / project / scope |
+| `GET /api/stats/topics?limit=N` | topic_key ranking by revision count |
+| `GET /api/memories?q=&project=&type=&page=&size=` | Browse or FTS5 search (BM25), paginated |
+| `GET /api/memories/{id}` | Full record incl. content |
+| `GET /api/tokens` | List tokens (suffix only — full token is never returned after creation) |
+| `POST /api/tokens` | Issue `{name, note}` → returns the full token **exactly once** |
+| `POST /api/tokens/{name}/revoke` · `unrevoke` | Disable / re-enable |
+| `PATCH /api/tokens/{name}` | Update note |
+| `DELETE /api/tokens/{name}` | Remove permanently |
+
+## 4. Filesystem layout · 文件与权限
+
+| Path | Owner | Mode | Purpose |
+|---|---|---|---|
+| `/var/lib/engram-mcp` | `engram:engram` | `750` | Parent of data dir (must be traversable by group!) |
+| `/var/lib/engram-mcp/.engram/` | `engram:engram` | `750` | Data dir |
+| `…/.engram/engram.db*` | `engram:engram` | `640` | DB + WAL/SHM; group read = panel's only access |
+| `/etc/engram-mcp` | `engramadm:engram` | `750` | Config dir (panel needs write for atomic token writes) |
+| `/etc/engram-mcp/tokens.json` | `engramadm:engram` | `660` | Token list: panel writes, server reads via group |
+| `/etc/engram-mcp/admin.env` | `engramadm:engramadm` | `600` | `ENGRAM_ADMIN_PASS_BCRYPT=…` |
+| `/etc/engram-mcp.env` | `root:root` | `600` | Server env (EnvironmentFile of engram-mcp.service) |
+
+> ⚠️ Two easy-to-miss details: the **parent** `/var/lib/engram-mcp` also needs group-traverse permission
+> (relaxing only the inner dir is not enough), and `/etc/engram-mcp` must be owned by the panel user or
+> atomic tmp+rename writes fail with EACCES.
+
+## 5. systemd units · 示例
+
+`docs/engram-mcp.service.example`:
+
+```ini
+[Unit]
+Description=engram LAN MCP server (patched, token-list auth)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=engram
+Group=engram
+EnvironmentFile=/etc/engram-mcp.env
+ExecStart=/usr/local/bin/engram mcp --http 0.0.0.0:7440 --project=team-kb
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`docs/engram-admin.service.example`:
+
+```ini
+[Unit]
+Description=engram admin panel (token management + read-only memory view)
+After=network-online.target engram-mcp.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=engramadm
+Group=engram
+Environment=ENGRAM_ADMIN_ADDR=:7441
+Environment=ENGRAM_DB=/var/lib/engram-mcp/.engram/engram.db
+Environment=ENGRAM_TOKENS_FILE=/etc/engram-mcp/tokens.json
+EnvironmentFile=/etc/engram-mcp/admin.env
+ExecStart=/usr/local/bin/engram-admin
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/etc/engram-mcp
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`/etc/engram-mcp.env` example:
+
+```dotenv
+ENGRAM_DATA_DIR=/var/lib/engram-mcp/.engram
+ENGRAM_MCP_TOKENS_FILE=/etc/engram-mcp/tokens.json
+# legacy single-token fallback, only used when TOKENS_FILE is unset:
+# ENGRAM_MCP_TOKEN=…
+```
+
+## 6. Client onboarding · 同事接入
+
+```bash
+claude mcp add --transport http engram-team http://<server>:7440/mcp \
+  --header "Authorization: Bearer <token>"
+# verify
+claude mcp list   # expect: engram-team … ✔ Connected
+```
+
+Other agents (Codex / Gemini CLI / Cursor): use their HTTP-transport MCP config with the same URL and header.
+
+## 7. Uninstall · 完全卸载
+
+```bash
+sudo systemctl disable --now engram-mcp engram-admin
+sudo rm -f /etc/systemd/system/engram-{mcp,admin}.service \
+           /usr/local/bin/{engram,engram-admin} /etc/engram-mcp.env
+sudo rm -rf /etc/engram-mcp /var/lib/engram-mcp      # deletes the memory base!
+sudo userdel engram && sudo userdel engramadm
+```

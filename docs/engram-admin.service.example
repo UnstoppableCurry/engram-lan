@@ -1,0 +1,24 @@
+[Unit]
+Description=engram admin panel (token management + read-only memory view)
+After=network-online.target engram-mcp.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=engramadm
+Group=engram
+Environment=ENGRAM_ADMIN_ADDR=:7441
+Environment=ENGRAM_DB=/var/lib/engram-mcp/.engram/engram.db
+Environment=ENGRAM_TOKENS_FILE=/etc/engram-mcp/tokens.json
+EnvironmentFile=/etc/engram-mcp/admin.env
+ExecStart=/usr/local/bin/engram-admin
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/etc/engram-mcp
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
