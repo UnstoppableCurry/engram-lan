@@ -48,7 +48,7 @@ Upstream's `engram cloud serve` is a **sync backend** (Postgres + JWT): every cl
 The panel has a real account system with two roles:
 
 - **Admin** (seeded from `ENGRAM_ADMIN_PASS_BCRYPT` on first run): everything a member can do, plus **User management** (create/disable/reset-password/delete accounts) and the legacy **Token 管理** page. Deleting a user also deletes their agent token.
-- **Member**: logs in with username + password, lands on **我的 Key / My Key** — one click to mint or regenerate their personal agent token (old one dies instantly, hot-reloaded by the server), plus a copy-ready `claude mcp add` command with the token already filled in. Members can also change their own password and browse the read-only memory/stats pages.
+- **Member**: logs in with username + password, lands on **我的 Key / My Key** — one click to mint or regenerate their personal agent token (old one dies instantly, hot-reloaded by the server), plus **copy-ready permanent-config snippets for Claude Code (global `-s user` / project `-s project`), Codex, Cursor, and Gemini CLI**, each with its own copy button and the config file path it lands in. Members can also change their own password and browse the read-only memory/stats pages.
 
 Sessions carry roles; every admin-only API is enforced server-side (`403` for members), not just hidden in the nav.
 
@@ -180,7 +180,7 @@ No TLS — it is plain HTTP inside your LAN. Do not expose either port outside i
 面板是完整的账号系统，两种角色：
 
 - **管理员**（首次启动用 `ENGRAM_ADMIN_PASS_BCRYPT` 播种）：拥有成员全部能力，外加**用户管理**（开通/禁用/重置密码/删除，删除会连带吊销并删除该用户的 agent token）和 **Token 管理**页。
-- **普通成员**：用户名 + 密码登录，落地页就是**我的 Key**——一键生成/重新生成自己的 agent key（旧 key 立即失效，服务端热重载），页面直接给出已填好 token 的 `claude mcp add` 接入命令，复制即用。成员还可以自助改密码、浏览只读的 memory/统计页。
+- **普通成员**：用户名 + 密码登录，落地页就是**我的 Key**——一键生成/重新生成自己的 agent key（旧 key 立即失效，服务端热重载），并提供 **Claude Code（全局 `-s user` / 本项目 `-s project`）、Codex、Cursor、Gemini CLI 四种客户端的永久配置片段**，每段都带复制按钮和它写入的配置文件路径说明，复制即用、一次配置永久生效。成员还可以自助改密码、浏览只读的 memory/统计页。
 
 会话带角色，所有管理员 API 在服务端强校验（成员访问返回 403），不只是藏导航。
 

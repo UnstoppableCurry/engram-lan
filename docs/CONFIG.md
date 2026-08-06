@@ -169,14 +169,58 @@ ENGRAM_MCP_TOKENS_FILE=/etc/engram-mcp/tokens.json
 
 ## 6. Client onboarding · 同事接入
 
+The panel's **我的 Key / My Key** page generates every snippet below with the member's token already filled in, plus a copy button — members never hand-edit a token. All of them are **write-once, permanent**: re-config only after regenerating the key, revocation, or a new machine. / 面板「我的 Key」页已把下列配置按成员 token 填好，一键复制。全部一次配置永久生效，只有重生 key / 被吊销 / 换电脑才需要重配。
+
+### Claude Code
+
 ```bash
+# global, all projects (recommended) · 全局，所有项目生效
 claude mcp add --transport http engram-team http://<server>:7440/mcp \
-  --header "Authorization: Bearer <token>"
+  --header "Authorization: Bearer <token>" -s user        # writes ~/.claude.json
+
+# this project only, shareable via git · 仅本项目，.mcp.json 可提交共享
+claude mcp add --transport http engram-team http://<server>:7440/mcp \
+  --header "Authorization: Bearer <token>" -s project     # writes ./.mcp.json
+
 # verify
 claude mcp list   # expect: engram-team … ✔ Connected
 ```
 
-Other agents (Codex / Gemini CLI / Cursor): use their HTTP-transport MCP config with the same URL and header.
+### Codex — append to `~/.codex/config.toml`
+
+```toml
+[mcp_servers.engram-team]
+url = "http://<server>:7440/mcp"
+http_headers = { Authorization = "Bearer <token>" }
+```
+
+### Cursor — merge into `~/.cursor/mcp.json`
+
+```json
+{
+  "mcpServers": {
+    "engram-team": {
+      "url": "http://<server>:7440/mcp",
+      "headers": { "Authorization": "Bearer <token>" }
+    }
+  }
+}
+```
+
+### Gemini CLI — merge into `~/.gemini/settings.json`
+
+```json
+{
+  "mcpServers": {
+    "engram-team": {
+      "httpUrl": "http://<server>:7440/mcp",
+      "headers": { "Authorization": "Bearer <token>" }
+    }
+  }
+}
+```
+
+Other agents: use their HTTP-transport MCP config with the same URL and `Authorization: Bearer <token>` header.
 
 ## 7. Uninstall · 完全卸载
 

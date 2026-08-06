@@ -48,7 +48,27 @@
           <span id="me-token-state"></span>
         </div>
         <p class="muted small">这个 key 就是你的身份。agent 带上它读写共享记忆库。</p>
-        <div class="mem-content" id="me-join-cmd" style="margin-top:12px; font-family:ui-monospace,monospace; font-size:12.5px"></div>
+        <div id="me-join" style="margin-top:14px">
+          <h4 style="margin:0 0 8px">一键永久接入（配一次，永久生效）</h4>
+          <div class="seg" id="join-seg">
+            <button data-k="claude-user" class="on">Claude Code · 全局</button>
+            <button data-k="claude-project">Claude Code · 本项目</button>
+            <button data-k="codex">Codex</button>
+            <button data-k="cursor">Cursor</button>
+            <button data-k="gemini">Gemini CLI</button>
+          </div>
+          <div class="mem-content" style="margin-top:10px">
+            <pre id="join-snippet" style="margin:0;white-space:pre-wrap;word-break:break-all;font-family:ui-monospace,monospace;font-size:12.5px"></pre>
+          </div>
+          <div style="margin-top:10px">
+            <button class="ghost" id="join-copy">复制配置</button>
+            <span class="muted small" id="join-hint" style="margin-left:10px"></span>
+          </div>
+          <p class="muted small" style="margin-top:10px">
+            以上配置<strong>一次写入永久生效</strong>，重启终端/IDE 都在。只有三种情况要重配：
+            ① 你点了「重新生成 key」（旧 key 立即失效）；② 管理员吊销了你的 key；③ 换了台新电脑。
+          </p>
+        </div>
         <div style="margin-top:14px">
           <button class="ghost" id="me-regen">重新生成 key</button>
           <span class="muted small" style="margin-left:10px">旧 key 立即失效，agent 需换命令重配</span>

@@ -169,7 +169,7 @@ function renderMeToken(d) {
   const has = !!meState.token;
   $("#me-token-row").classList.toggle("hidden", !has);
   $("#me-no-token").classList.toggle("hidden", has);
-  $("#me-join-cmd").parentElement && ($("#me-join-cmd").style.display = has ? "" : "none");
+  $("#me-join").style.display = has ? "" : "none";
   if (!has) return;
   const shown = meState.revealed ? meState.token : "eng_••••••••••••••••";
   $("#me-token").textContent = shown;
@@ -177,9 +177,52 @@ function renderMeToken(d) {
   const revoked = d && d.token_revoked;
   $("#me-token-state").innerHTML = revoked
     ? ` <span class="tag off">已吊销</span>` : ` <span class="tag ok">有效</span>`;
-  $("#me-join-cmd").textContent =
-    `claude mcp add --transport http engram-team ${state.meta.mcp_url} --header "Authorization: Bearer ${meState.token}"`;
+  renderJoin();
 }
+
+/* join snippets: token already filled, copy-ready */
+const joinState = { key: "claude-user" };
+
+function joinSnippet(k) {
+  const url = state.meta.mcp_url, tok = meState.token;
+  switch (k) {
+    case "claude-user":
+      return `claude mcp add --transport http engram-team ${url} --header "Authorization: Bearer ${tok}" -s user`;
+    case "claude-project":
+      return `claude mcp add --transport http engram-team ${url} --header "Authorization: Bearer ${tok}" -s project`;
+    case "codex":
+      return `# 追加到 ~/.codex/config.toml\n[mcp_servers.engram-team]\nurl = "${url}"\nhttp_headers = { Authorization = "Bearer ${tok}" }`;
+    case "cursor":
+      return `// 合并进 ~/.cursor/mcp.json（保留你已有的其他 server）\n{\n  "mcpServers": {\n    "engram-team": {\n      "url": "${url}",\n      "headers": { "Authorization": "Bearer ${tok}" }\n    }\n  }\n}`;
+    case "gemini":
+      return `// 合并进 ~/.gemini/settings.json（保留你已有的其他 server）\n{\n  "mcpServers": {\n    "engram-team": {\n      "httpUrl": "${url}",\n      "headers": { "Authorization": "Bearer ${tok}" }\n    }\n  }\n}`;
+  }
+  return "";
+}
+
+const JOIN_HINTS = {
+  "claude-user": "终端跑一遍即可，写入 ~/.claude.json —— 所有项目永久生效",
+  "claude-project": "终端跑一遍即可，写入 ./.mcp.json —— 可提交 git 全组共享（注意别泄露 key）",
+  "codex": "手动编辑文件，配置立即生效；Codex 较老版本字段名可能是 experimental_http_headers",
+  "cursor": "手动编辑文件，Cursor 重启后生效（Settings → MCP 可看状态）",
+  "gemini": "手动编辑文件，下次启动 gemini 生效",
+};
+
+function renderJoin() {
+  $("#join-snippet").textContent = joinSnippet(joinState.key);
+  $("#join-hint").textContent = JOIN_HINTS[joinState.key] || "";
+  $("#join-copy").textContent = "复制配置";
+}
+
+document.querySelectorAll("#join-seg button").forEach((b) => (b.onclick = () => {
+  joinState.key = b.dataset.k;
+  document.querySelectorAll("#join-seg button").forEach((x) => x.classList.toggle("on", x === b));
+  renderJoin();
+}));
+
+$("#join-copy").onclick = function () {
+  navigator.clipboard.writeText(joinSnippet(joinState.key)).then(() => (this.textContent = "已复制 ✓"));
+};
 
 $("#me-token-reveal").onclick = function () {
   meState.revealed = !meState.revealed;
