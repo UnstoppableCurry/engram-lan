@@ -7,6 +7,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![Upstream](https://img.shields.io/badge/patches%20engram-v1.20.0-blue)](https://github.com/Gentleman-Programming/engram)
+[![Pages](https://img.shields.io/badge/展示页-GitHub%20Pages-58a6ff)](https://unstoppablecurry.github.io/engram-lan/)
+
+**产品 / 架构展示（静态）：** [unstoppablecurry.github.io/engram-lan](https://unstoppablecurry.github.io/engram-lan/) · 截图与动图来自 `docs/assets`，非实时面板。
 
 ---
 
@@ -143,6 +146,8 @@ No TLS — it is plain HTTP inside your LAN. Do not expose either port outside i
 ---
 
 ## 中文文档
+
+**展示页：** [unstoppablecurry.github.io/engram-lan](https://unstoppablecurry.github.io/engram-lan/)（架构说明、界面截图与演示 GIF，静态站点）
 
 ### 这是什么
 

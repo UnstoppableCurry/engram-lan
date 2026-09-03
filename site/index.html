@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>engram-lan · 局域网共享 Agent 记忆库</title>
+  <meta name="description" content="engram-lan：为 engram 提供多 token HTTP 传输补丁与只读管理面板，让团队在同一局域网内共享一份 SQLite 记忆库。">
+  <meta name="keywords" content="engram, MCP, LAN, AI agent, 记忆库, SQLite">
+  <link rel="canonical" href="https://unstoppablecurry.github.io/engram-lan/">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="engram-lan · 局域网共享 Agent 记忆库">
+  <meta property="og:description" content="多 token 网络传输补丁 + 只读管理面板：账号、Memory 浏览、全文搜索与统计。">
+  <meta property="og:url" content="https://unstoppablecurry.github.io/engram-lan/">
+  <meta property="og:image" content="https://unstoppablecurry.github.io/engram-lan/assets/dash.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="stylesheet" href="css/main.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="./">engram<span>-lan</span></a>
+      <nav class="site-nav" aria-label="页面导航">
+        <a href="#overview">概览</a>
+        <a href="#architecture">架构</a>
+        <a href="#screenshots">界面</a>
+        <a href="#demos">演示</a>
+        <a href="#workflow">工作流</a>
+        <a href="#security">安全</a>
+        <a href="#limits">限制</a>
+        <a href="https://github.com/UnstoppableCurry/engram-lan">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="hero">
+    <p class="hero-badge">静态产品展示 · 非实时面板</p>
+    <h1>局域网共享 Agent 记忆库</h1>
+    <p class="hero-lead">
+      基于 <a href="https://github.com/Gentleman-Programming/engram">engram</a> v1.20.0 的补丁与只读管理面板：
+      一个服务进程独占 SQLite，网段内多个 agent 经 HTTP + Bearer token 读写<strong>同一份库</strong>。
+    </p>
+    <div class="hero-meta">
+      <span>Go 1.26+</span>
+      <span>补丁 ~230 行 · 仅改 <code>cmd/engram/main.go</code></span>
+      <span>MCP 默认端口 7440 · 面板 7441</span>
+      <span>MIT</span>
+    </div>
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="https://github.com/UnstoppableCurry/engram-lan#中文文档">阅读 README 快速开始</a>
+      <a class="btn btn-ghost" href="https://github.com/UnstoppableCurry/engram-lan/blob/main/docs/CONFIG.md">配置参考 CONFIG.md</a>
+    </div>
+    <p class="note" style="margin-top:1.25rem;margin-bottom:0">
+      <strong>说明：</strong>本页为文档化静态展示，截图与动图来自仓库 <code>docs/assets</code>。
+      实际管理面板需自行部署 <code>engram-admin</code> 并连接 Go API，此处不提供可交互的假仪表盘。
+    </p>
+  </div>
+
+  <main id="main">
+    <section id="overview" aria-labelledby="overview-heading">
+      <h2 id="overview-heading">项目组成</h2>
+      <p class="section-intro">
+        上游 engram 的 MCP 仅支持 stdio（一 agent 一进程、同机限定）。
+        engram-lan 用两个独立组件解决局域网共享，不带 <code>--http</code> 时补丁行为与上游 100% 一致。
+      </p>
+      <div class="panel" style="overflow-x:auto">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">组件</th>
+              <th scope="col">作用</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>patches/engram-lan-mcp-v2.patch</code></td>
+              <td>
+                为 <code>engram mcp</code> 增加 <code>--http &lt;addr&gt;</code>（mcp-go streamable HTTP，同一 <code>MCPServer</code>，工具未改）
+                + 多账号 token 名单文件鉴权（mtime 热重载）。
+              </td>
+            </tr>
+            <tr>
+              <td><code>admin/</code></td>
+              <td>
+                零依赖 Go 二进制：账号体系（管理员 / 成员）、按人签发/吊销 token（无需重启服务）、
+                只读 Memory 浏览（FTS5 全文搜索）、全局统计大盘。
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="section-intro" style="margin-top:1rem">
+        与上游 <code>engram cloud serve</code>（Postgres 同步、N 份本地 SQLite 最终一致）不同，
+        engram-lan 是<strong>单库共享</strong>语义——README 中描述为团队知识库场景的定位差异。
+      </p>
+    </section>
+
+    <section id="architecture" aria-labelledby="architecture-heading">
+      <h2 id="architecture-heading">架构</h2>
+      <div class="arch-diagram" role="img" aria-label="架构示意：多个 agent 经 HTTP JSON-RPC 连接 engram-mcp，SQLite 由单进程持有，浏览器连接 engram-admin 只读访问">
+        <pre>agent A ──┐
+agent B ──┼── HTTP + JSON-RPC（Bearer token）──▶ engram-mcp :7440
+agent C ──┘                                      │  补丁 v2：token 名单鉴权
+                                                 │ （mtime 变化自动热重载）
+                                                 ▼
+                                          store.Store（单进程持有）
+                                                 ▼
+                                          SQLite WAL + FTS5
+                                                 ▲
+你 ── 浏览器 ──▶ engram-admin :7441 ─────────────┘
+                 （登录、token 管理、只读 memory + 统计）</pre>
+      </div>
+      <ul class="constraints" style="margin-top:1rem">
+        <li>
+          <strong>SQLite WAL 与本地文件锁</strong>
+          WAL 需要 <code>-shm</code> 共享内存与本地锁语义；网络盘会损坏数据库，因此必须单进程独占文件，其余客户端走网络。
+        </li>
+        <li>
+          <strong>面板只读由 OS + 代码双重保证</strong>
+          面板用户组权限仅读库目录/文件，且以 <code>mode=ro</code> 打开 SQLite；即使面板被攻破也无法写入记忆库。
+        </li>
+        <li>
+          <strong>token 名单是唯一写面</strong>
+          面板原子写入 <code>tokens.json</code>；engram 按 mtime 热重载；文件丢失或损坏时 fail-closed（全部 401）。
+        </li>
+      </ul>
+    </section>
+
+    <section id="screenshots" aria-labelledby="screenshots-heading">
+      <h2 id="screenshots-heading">管理面板界面（静态截图）</h2>
+      <p class="section-intro">以下七张 PNG 来自仓库 <code>docs/assets</code>，展示部署后真实面板的只读浏览与统计视图。</p>
+      <div class="gallery">
+        <figure class="figure">
+          <img src="assets/dash.png" alt="总览大盘：记忆总量、会话、项目等汇总指标" width="960" height="540" loading="lazy" decoding="async">
+          <figcaption>总览大盘</figcaption>
+        </figure>
+        <figure class="figure">
+          <img src="assets/memory.png" alt="Memory 列表浏览与筛选" width="960" height="540" loading="lazy" decoding="async">
+          <figcaption>Memory 浏览</figcaption>
+        </figure>
+        <figure class="figure">
+          <img src="assets/detail.png" alt="单条记忆详情与完整内容" width="960" height="540" loading="lazy" decoding="async">
+          <figcaption>记忆详情</figcaption>
+        </figure>
+        <figure class="figure">
+          <img src="assets/stats.png" alt="统计分析：类型、项目、时间序列等维度" width="960" height="540" loading="lazy" decoding="async">
+          <figcaption>统计分析</figcaption>
+        </figure>
+        <figure class="figure">
+          <img src="assets/me.png" alt="成员「我的 Key」页：自助生成 token 与客户端配置片段" width="960" height="540" loading="lazy" decoding="async">
+          <figcaption>我的 Key（成员自助）</figcaption>
+        </figure>
+        <figure class="figure">
+          <img src="assets/users.png" alt="管理员用户管理：开通、禁用、重置密码" width="960" height="540" loading="lazy" decoding="async">
+          <figcaption>用户管理（管理员）</figcaption>
+        </figure>
+        <figure class="figure">
+          <img src="assets/tokens.png" alt="管理员 Token 管理列表" width="960" height="540" loading="lazy" decoding="async">
+          <figcaption>Token 管理（管理员）</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section id="demos" aria-labelledby="demos-heading">
+      <h2 id="demos-heading">操作流程演示（GIF）</h2>
+      <p class="section-intro">大型动图采用懒加载，减少首屏流量。内容对应 README 中的三项演示。</p>
+      <div class="demo-grid">
+        <article class="demo-item">
+          <img src="assets/tour.gif" alt="面板全流程演示：大盘、趋势切换、浏览与详情" width="960" height="540" loading="lazy" decoding="async">
+          <div class="demo-caption">
+            <h3>面板全流程</h3>
+            <p>总览、趋势切换、Memory 浏览与详情查看。</p>
+          </div>
+        </article>
+        <article class="demo-item">
+          <img src="assets/tokens.gif" alt="按人签发与吊销 token，立即生效无需重启" width="960" height="540" loading="lazy" decoding="async">
+          <div class="demo-caption">
+            <h3>Token 签发 / 吊销</h3>
+            <p>名单文件热重载；吊销后 MCP 侧立即 401，无需重启 engram-mcp。</p>
+          </div>
+        </article>
+        <article class="demo-item">
+          <img src="assets/search.gif" alt="全文搜索：SQLite FTS5 BM25 排序结果" width="960" height="540" loading="lazy" decoding="async">
+          <div class="demo-caption">
+            <h3>全文搜索</h3>
+            <p>面板调用 <code>GET /api/memories?q=…</code>，底层 FTS5 + BM25 排序（见 CONFIG.md API 说明）。</p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section id="workflow" aria-labelledby="workflow-heading">
+      <h2 id="workflow-heading">Admin / 搜索 / 统计工作流</h2>
+      <p class="section-intro">基于 <code>admin/static/index.html</code> 导航与 <code>docs/CONFIG.md</code> 记录的 API，面板能力如下（需自行部署后使用）。</p>
+      <div class="steps">
+        <div class="step">
+          <div>
+            <h3>登录与角色</h3>
+            <p>
+              首次启动用 <code>ENGRAM_ADMIN_PASS_BCRYPT</code> 播种管理员。
+              成员用用户名密码登录；会话带角色，<code>/api/users*</code> 与 <code>/api/tokens*</code> 仅管理员（成员得 403）。
+            </p>
+          </div>
+        </div>
+        <div class="step">
+          <div>
+            <h3>成员：我的 Key</h3>
+            <p>
+              一键生成/重新生成个人 agent token（旧 token 立即失效）。
+              提供 Claude Code、Codex、Cursor、Gemini CLI 的配置片段与复制按钮（URL 来自 <code>ENGRAM_ADMIN_MCP_URL</code>）。
+            </p>
+          </div>
+        </div>
+        <div class="step">
+          <div>
+            <h3>Memory 浏览与搜索</h3>
+            <p>
+              <code>GET /api/memories</code> 分页浏览；带 <code>q</code> 参数时走 FTS5 搜索。
+              <code>GET /api/memories/{id}</code> 查看完整记录。面板对 engram.db 只读打开。
+            </p>
+          </div>
+        </div>
+        <div class="step">
+          <div>
+            <h3>统计大盘</h3>
+            <p>
+              <code>/api/stats/overview</code> 汇总指标；
+              <code>/api/stats/timeseries</code> 按日写入量；
+              <code>/api/stats/breakdown</code> 按类型/项目/scope；
+              <code>/api/stats/topics</code> 按 revision 排名的 topic_key。
+            </p>
+          </div>
+        </div>
+        <div class="step">
+          <div>
+            <h3>管理员：用户与 Token</h3>
+            <p>
+              用户管理：创建/禁用/重置密码/删除（删除连带吊销 token）。
+              Token 管理：签发、吊销、更新备注；完整 token 仅在创建/重新生成时返回一次。
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="security" aria-labelledby="security-heading">
+      <h2 id="security-heading">安全模型（文档摘录）</h2>
+      <p class="section-intro">以下内容摘自 README / CONFIG.md，描述已实现的机制，非额外安全承诺。</p>
+      <div class="panel" style="overflow-x:auto">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">层</th>
+              <th scope="col">机制</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>网络鉴权</td>
+              <td>按人 Bearer token；constant-time 比对；名单热重载；吊销/损坏 → 401（fail-closed）；401 记录来源 IP。</td>
+            </tr>
+            <tr>
+              <td>面板登录</td>
+              <td>独立 SQLite 账号库；bcrypt；内存会话（HttpOnly + SameSite=Strict）；登录限流 5 次/5 分钟/IP。</td>
+            </tr>
+            <tr>
+              <td>库完整性</td>
+              <td>面板文件系统只读 + <code>mode=ro</code>；engram-mcp 为唯一写入者。</td>
+            </tr>
+            <tr>
+              <td>同机隔离</td>
+              <td>库目录 <code>750</code>、文件 <code>640</code>、组 <code>engram</code>；仅面板用户在组内。</td>
+            </tr>
+            <tr>
+              <td>传输</td>
+              <td>局域网内明文 HTTP；README 明确建议勿将 7440/7441 暴露到内网之外。未内置 TLS。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="limits" aria-labelledby="limits-heading">
+      <h2 id="limits-heading">已知限制</h2>
+      <ul class="constraints">
+        <li>
+          <strong>写入项目名须服务端可解析</strong>
+          需 <code>--project</code> 默认或预先 seed 的项目；服务端无客户端 cwd。读取不受此限。
+        </li>
+        <li>
+          <strong>共享库全员可读</strong>
+          持有 token 者可读写同一知识空间；私人记忆应留在本机 engram。
+        </li>
+        <li>
+          <strong>面板会话在内存</strong>
+          面板重启需重新登录；agent token 与 SQLite 数据不受影响。
+        </li>
+        <li>
+          <strong>部署环境</strong>
+          README 快速开始面向 Linux 服务器与 Go ≥ 1.26；需自行配置 systemd 与文件权限（见 CONFIG.md）。
+        </li>
+      </ul>
+      <div class="hero-actions" style="margin-top:1.5rem">
+        <a class="btn btn-primary" href="https://github.com/UnstoppableCurry/engram-lan">查看完整 README</a>
+        <a class="btn btn-ghost" href="https://github.com/UnstoppableCurry/engram-lan/blob/main/docs/CONFIG.md">配置参考</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <p>
+      <a href="https://github.com/UnstoppableCurry/engram-lan">GitHub 仓库</a> ·
+      <a href="https://github.com/UnstoppableCurry/engram-lan/blob/main/LICENSE">MIT License</a> ·
+      补丁目标 engram v1.20.0
+    </p>
+    <p>静态展示页 · 非 engram-admin 实时服务</p>
+  </footer>
+</body>
+</html>

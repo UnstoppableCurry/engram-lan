@@ -3,3 +3,6 @@ admin/engram-admin*
 !admin/static/
 .DS_Store
 *.log
+
+# GitHub Pages: assets copied from docs/assets in CI
+site/assets/
